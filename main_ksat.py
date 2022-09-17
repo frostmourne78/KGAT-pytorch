@@ -205,7 +205,7 @@ def train(args):
     k_max = max(Ks)
 
     epoch_list = []
-    metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
+    metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': [],'hit_ratio':[]} for k in Ks}
 
     # train model
     print("start training ...")
@@ -242,26 +242,32 @@ def train(args):
             ret = evaluate(model, n_items, args.test_batch_size, user_dict, Ks, device)
             print(ret)
             epoch_list.append(epoch)
+            n=0
+            for m in ['precision', 'recall', 'ndcg','hit_ratio']:
+                for k in Ks:
+                    metrics_list[k][m].append(ret[m][n])
+                    n=n+1
+                n=0
 
     # save metrics
     metrics_df = [epoch_list]
     metrics_cols = ['epoch_idx']
     for k in Ks:
-        for m in ['precision', 'recall', 'ndcg']:
+        for m in ['precision', 'recall', 'ndcg','hit_ratio']:
             metrics_df.append(metrics_list[k][m])
             metrics_cols.append('{}@{}'.format(m, k))
     metrics_df = pd.DataFrame(metrics_df).transpose()
     metrics_df.columns = metrics_cols
     metrics_df.to_csv(args.save_dir + '/metrics.tsv', sep='\t', index=False)
 
-    # print best metrics
-    best_metrics = metrics_df.loc[metrics_df['epoch_idx'] == best_epoch].iloc[0].to_dict()
-    logging.info(
-        'Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-            int(best_metrics['epoch_idx']), best_metrics['precision@{}'.format(k_min)],
-            best_metrics['precision@{}'.format(k_max)], best_metrics['recall@{}'.format(k_min)],
-            best_metrics['recall@{}'.format(k_max)], best_metrics['ndcg@{}'.format(k_min)],
-            best_metrics['ndcg@{}'.format(k_max)]))
+    # # print best metrics
+    # best_metrics = metrics_df.loc[metrics_df['epoch_idx'] == best_epoch].iloc[0].to_dict()
+    # logging.info(
+    #     'Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
+    #         int(best_metrics['epoch_idx']), best_metrics['precision@{}'.format(k_min)],
+    #         best_metrics['precision@{}'.format(k_max)], best_metrics['recall@{}'.format(k_min)],
+    #         best_metrics['recall@{}'.format(k_max)], best_metrics['ndcg@{}'.format(k_min)],
+    #         best_metrics['ndcg@{}'.format(k_max)]))
 
 
 def predict(args):
