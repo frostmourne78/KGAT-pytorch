@@ -17,7 +17,6 @@ from utils.metrics import *
 from utils.model_helper import *
 from data_loader.loader_ksat import load_data
 
-
 n_users = 0
 n_items = 0
 n_entities = 0
@@ -25,7 +24,7 @@ n_nodes = 0
 n_relations = 0
 
 
-def get_feed_dict(train_entity_pairs, n_items,start, end, train_user_set):
+def get_feed_dict(train_entity_pairs, n_items, start, end, train_user_set):
     def negative_sampling(user_item, train_user_set):
         neg_items = []
         for user, _ in user_item.cpu().numpy():
@@ -45,12 +44,14 @@ def get_feed_dict(train_entity_pairs, n_items,start, end, train_user_set):
     return feed_dict
 
 
-def evaluate(model,n_items, test_batch_size,user_dict, Ks, device):
+def evaluate(model, n_items, test_batch_size, user_dict, Ks, device):
     result = {'precision': np.zeros(len(Ks)),
               'recall': np.zeros(len(Ks)),
               'ndcg': np.zeros(len(Ks)),
               'hit_ratio': np.zeros(len(Ks)),
               'auc': 0.}
+
+    batch_result_mid=list()
     test_batch_size_e = test_batch_size
     model.eval()
     train_user_dict = user_dict['train_user_set']
@@ -71,6 +72,7 @@ def evaluate(model,n_items, test_batch_size,user_dict, Ks, device):
         start = u_batch_id * u_batch_size
         end = (u_batch_id + 1) * u_batch_size
 
+        batch_result_mid = list()
         user_list_batch = test_users[start: end]
         user_batch = torch.LongTensor(np.array(user_list_batch)).to(device)
         u_g_embeddings = user_gcn_emb[user_batch]
@@ -85,7 +87,7 @@ def evaluate(model,n_items, test_batch_size,user_dict, Ks, device):
                 i_start = i_batch_id * i_batch_size
                 i_end = min((i_batch_id + 1) * i_batch_size, n_items)
 
-                item_batch = torch.LongTensor(np.array(range(i_start, i_end))).view(i_end-i_start).to(device)
+                item_batch = torch.LongTensor(np.array(range(i_start, i_end))).view(i_end - i_start).to(device)
                 i_g_embddings = entity_gcn_emb[item_batch]
 
                 i_rate_batch = model.rating(u_g_embeddings, i_g_embddings).detach().cpu()
@@ -97,43 +99,49 @@ def evaluate(model,n_items, test_batch_size,user_dict, Ks, device):
 
         user_batch_rating_uid = list(zip(rate_batch, user_list_batch))
 
-        rating =user_batch_rating_uid[0]
-        u=user_batch_rating_uid[1]
+        for i_user in range(0, len(user_batch_rating_uid)):
+            mid = user_batch_rating_uid[i_user]
+            rating = mid[0]
+            u = mid[1]
 
-        try:
-            training_items = train_user_dict[u]
-        except Exception:
-            training_items = []
-            # user u's items in the test set
-        user_pos_test = test_user_dict[u]
+            try:
+                training_items = train_user_dict[u]
+            except Exception:
+                training_items = []
+                # user u's items in the test set
+            user_pos_test = test_user_dict[u]
 
-        all_items = set(range(0, n_items))
-        test_items = list(all_items - set(training_items))
-        if True:
-            r, auc = ranklist_by_heapq(user_pos_test, test_items, rating, Ks)
+            all_items = set(range(0, n_items))
+            test_items = list(all_items - set(training_items))
+            if True:
+                r, auc = ranklist_by_heapq(user_pos_test, test_items, rating, Ks)
 
-        batch_result=get_performance(user_pos_test, r, auc, Ks)
+            batch_result = get_performance(user_pos_test, r, auc, Ks,batch_result_mid)
 
         count += len(batch_result)
 
-        result['precision'] += batch_result['precision']/n_test_users
-        result['recall'] += batch_result['recall']/n_test_users
-        result['ndcg'] += batch_result['ndcg']/n_test_users
-        result['hit_ratio'] += batch_result['hit_ratio']/n_test_users
-        result['auc'] += batch_result['auc']/n_test_users
+        for re in batch_result:
+            result['precision'] += re['precision']/n_test_users
+            result['recall'] += re['recall']/n_test_users
+            result['ndcg'] += re['ndcg']/n_test_users
+            result['hit_ratio'] += re['hit_ratio']/n_test_users
+            result['auc'] += re['auc']/n_test_users
+
+    assert count == n_test_users
     return result
 
-def get_performance(user_pos_test, r, auc, Ks):
-    precision, recall, ndcg, hit_ratio = [], [], [], []
 
+def get_performance(user_pos_test, r, auc, Ks,bath_result):
+    precision, recall, ndcg, hit_ratio = [], [], [], []
     for K in Ks:
         precision.append(precision_at_k(r, K))
         recall.append(recall_at_k(r, K, len(user_pos_test)))
         ndcg.append(ndcg_at_k(r, K, user_pos_test))
         hit_ratio.append(hit_at_k(r, K))
+    bath_result.append({'recall': np.array(recall), 'precision': np.array(precision), 'ndcg': np.array(ndcg),
+                        'hit_ratio': np.array(hit_ratio), 'auc': auc})
+    return bath_result
 
-    return {'recall': np.array(recall), 'precision': np.array(precision),
-            'ndcg': np.array(ndcg), 'hit_ratio': np.array(hit_ratio), 'auc': auc}
 
 def ranklist_by_heapq(user_pos_test, test_items, rating, Ks):
     item_score = {}
@@ -151,8 +159,10 @@ def ranklist_by_heapq(user_pos_test, test_items, rating, Ks):
             r.append(0)
     auc = 0.
     return r, auc
+
+
 def train(args):
-    global  device
+    global device
     # seed
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -199,7 +209,7 @@ def train(args):
 
     # train model
     print("start training ...")
-    for epoch in range(1,args.epoch):
+    for epoch in range(1, args.epoch):
         # shuffle training data
         index = np.arange(len(train_cf))
         np.random.shuffle(index)
@@ -209,56 +219,29 @@ def train(args):
         loss, s = 0, 0
         train_s_t = time()
         while s + args.cf_batch_size <= len(train_cf):
-            batch = get_feed_dict(train_cf_pairs,n_items,
+            batch = get_feed_dict(train_cf_pairs, n_items,
                                   s, s + args.cf_batch_size,
                                   user_dict['train_user_set'])
-            batch_loss = model(batch,mode='train_cf')
+            batch_loss = model(batch, mode='train_cf')
             batch_loss = batch_loss
             optimizer.zero_grad()
             batch_loss.backward()
             optimizer.step()
 
-            loss += batch_loss.item()
+            loss += batch_loss
             s += args.cf_batch_size
 
             if (epoch % args.cf_print_every) == 0:
                 logging.info(
                     'Training: Epoch {:04d}| Iter Loss {:.4f}'.format(epoch, batch_loss.item()))
-        logging.info('Training: Epoch {:04d} | Iter Mean Loss {:.4f}'.format(epoch,batch_loss / args.cf_batch_size))
+        logging.info('Training: Epoch {:04d} | Iter Mean Loss {:.4f}'.format(epoch, batch_loss / args.cf_batch_size))
 
         train_e_t = time()
 
-        if (epoch % args.evaluate_every) == 0 or epoch == args.epoch-1:
-            test_s_t = time()
-            ret = evaluate(model,n_items, args.test_batch_size,user_dict, Ks, device)
-            test_e_t = time()
-            train_res = PrettyTable()
-            train_res.field_names = ["Epoch", "training time", "tesing time", "Loss", "recall", "ndcg", "precision",
-                                     "hit_ratio"]
-            train_res.add_row(
-                [epoch, train_e_t - train_s_t, test_e_t - test_s_t, loss.item(), ret['recall'], ret['ndcg'],
-                 ret['precision'], ret['hit_ratio']]
-            )
-            print(train_res)
-
+        if (epoch % args.evaluate_every) == 0 or epoch == args.epoch - 1:
+            ret = evaluate(model, n_items, args.test_batch_size, user_dict, Ks, device)
+            print(ret)
             epoch_list.append(epoch)
-        #     for k in Ks:
-        #         for m in ['precision', 'recall', 'ndcg']:
-        #             metrics_list[k][m].append(metrics_dict[k][m])
-        #     best_recall, should_stop = early_stopping(metrics_list[k_min]['recall'], args.stopping_steps)
-        #
-        #     if should_stop:
-        #         break
-        #
-        #     if metrics_list[k_min]['recall'].index(best_recall) == len(epoch_list) - 1:
-        #         save_model(model, args.save_dir, epoch, best_epoch)
-        #         logging.info('Save model on epoch {:04d}!'.format(epoch))
-        #         best_epoch = epoch
-        #
-        # else:
-        #     # logging.info('training loss at epoch %d: %f' % (epoch, loss.item()))
-        #     print('using time %.4f, training loss at epoch %d: %.4f' % (
-        #         train_e_t - train_s_t, epoch, loss,))
 
     # save metrics
     metrics_df = [epoch_list]
@@ -286,7 +269,7 @@ def predict(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # load data
-    _,user_dict = load_data(args)
+    _, user_dict = load_data(args)
 
     # load model
     model = KSAT(args, n_users, n_entities, n_relations)
@@ -298,7 +281,7 @@ def predict(args):
     k_min = min(Ks)
     k_max = max(Ks)
 
-    cf_scores, metrics_dict = evaluate(model, args.test_batch_size,user_dict, Ks, device)
+    cf_scores, metrics_dict = evaluate(model, args.test_batch_size, user_dict, Ks, device)
     np.save(args.save_dir + 'cf_scores.npy', cf_scores)
     print('CF Evaluation: Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
         metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'],

@@ -331,7 +331,6 @@ class KSAT(nn.Module):
         user_embed = all_embed[user_ids]                # (n_users, concat_dim)
         item_embed = all_embed[item_ids]                # (n_items, concat_dim)
 
-        # Equation (12)
         cf_score = torch.matmul(user_embed, item_embed.transpose(0, 1))    # (n_users, n_items)
         return cf_score
 

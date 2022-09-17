@@ -19,7 +19,7 @@ def parse_ksat_args():
 
     #train
     parser.add_argument('--seed', type=int, default=2022,help='Random seed.')
-    parser.add_argument('--epoch', type=int, default=2, help='number of epochs')
+    parser.add_argument('--epoch', type=int, default=20, help='number of epochs')
     parser.add_argument('--cf_batch_size', type=int, default=1024,help='CF batch size.')
     parser.add_argument('--kg_batch_size', type=int, default=1024,help='KG batch size.')
     parser.add_argument('--test_batch_size', type=int, default=1024,help='Test batch size (the user number to test every batch).')
